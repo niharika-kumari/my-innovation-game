@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Innovation — Who's Most Likely To? 🏆</title>
+<!-- VERSION: 2.5 FIREBASE-FIXED -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Righteous&family=Nunito:wght@400;600;700;800;900&display=swap');
 
@@ -578,18 +579,30 @@ async function saveRoom(s){
     method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s)
   }).catch(()=>{});
 }
+// Firebase converts arrays to objects - convert them back
+function fixArrays(s){
+  if(!s) return s;
+  ['players','questions','joined'].forEach(k=>{
+    if(s[k] && !Array.isArray(s[k])){
+      s[k] = Object.values(s[k]);
+    }
+    if(!s[k]) s[k] = [];
+  });
+  return s;
+}
+
 async function getRoom(code){
   try{
     const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 4000); // 4s timeout
+    const timeout = setTimeout(()=>controller.abort(), 5000);
     const r = await fetch(FB_URL+'/rooms/'+code+'.json', {signal: controller.signal});
     clearTimeout(timeout);
     if(r.ok){
       const d = await r.json();
-      if(d&&d.code){ _localSave(d); return d; }
+      if(d && d.code){ const fixed=fixArrays(d); _localSave(fixed); return fixed; }
     }
-  }catch(e){}
-  return getRoomLocal(code); // fallback to local
+  }catch(e){ console.warn('getRoom error:', e.message); }
+  return fixArrays(getRoomLocal(code));
 }
 async function getOrFetchRoom(code){ return await getRoom(code); }
 function getShareLink(code){ return window.location.href.split('?')[0]+'?room='+code; }
@@ -677,7 +690,7 @@ async function joinRoom(){
       const r = await fetch(FB_URL+'/rooms/'+code+'.json');
       if(r.ok){
         const data = await r.json();
-        if(data && data.code){ s = data; break; }
+        if(data && data.code){ s = fixArrays(data); break; }
         else if(data === null){
           // Room exists in Firebase as null = not found
           break;
@@ -696,10 +709,10 @@ async function joinRoom(){
     return;
   }
   if(s.phase!=='lobby'){ showJE('Game already started — ask host to restart!'); return; }
-  if(s.joined.includes(name)){ showJE('Name taken — try a different name!'); return; }
+  if((s.joined||[]).includes(name)){ showJE('Name taken — try a different name!'); return; }
 
   myName=name; myRoom=code; isHost=false;
-  s.joined=[...s.joined, name];
+  s.joined=[...(Array.isArray(s.joined)?s.joined:Object.values(s.joined||{})), name];
   // Save join to Firebase - must complete before showing wait screen
   try{
     await fetch(FB_URL+'/rooms/'+code+'.json',{
