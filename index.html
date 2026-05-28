@@ -597,6 +597,17 @@ function loadBlobIdFromUrl(){}
 function loadStateFromUrl(){}
 function sendToHost(){}
 
+// ══ FIREBASE TEST ════════════════════════════════════════════════════
+async function testFirebase(){
+  try{
+    const testData = {test: true, t: Date.now()};
+    const r = await fetch(FB_URL+'/test.json',{
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(testData)
+    });
+    return r.ok;
+  }catch(e){ return false; }
+}
+
 // ══ ROOM CREATE ══════════════════════════════════════════════════════════
 async function createRoom(){
   if(setupP.length<2){toast('⚠️ Add at least 2 team members!');return;}
@@ -655,18 +666,49 @@ async function joinRoom(){
   if(!code){showJE('Enter a room code!');return;}
 
   const btn=document.querySelector('#sJoin .btn-brand');
-  btn.textContent='Joining...';btn.disabled=true;
+  btn.disabled=true;
 
-  const s = await getOrFetchRoom(code);
-  btn.textContent='Join →';btn.disabled=false;
+  // Try fetching room up to 3 times with status updates
+  let s = null;
+  const attempts = ['Connecting...','Fetching room...','Almost there...'];
+  for(let i=0; i<3; i++){
+    btn.textContent = attempts[i];
+    try{
+      const r = await fetch(FB_URL+'/rooms/'+code+'.json');
+      if(r.ok){
+        const data = await r.json();
+        if(data && data.code){ s = data; break; }
+        else if(data === null){
+          // Room exists in Firebase as null = not found
+          break;
+        }
+      }
+    }catch(e){
+      console.warn('Attempt '+(i+1)+' failed:', e.message);
+    }
+    if(i < 2) await new Promise(r=>setTimeout(r,1500));
+  }
 
-  if(!s){ showJE('Room not found! Check the code.'); return; }
-  if(s.phase!=='lobby'){ showJE('Game already started!'); return; }
-  if(s.joined.includes(name)){ showJE('Name taken — try another!'); return; }
+  btn.textContent='Join →'; btn.disabled=false;
+
+  if(!s){
+    showJE('❌ Room "'+code+'" not found. Make sure host has created the room first!');
+    return;
+  }
+  if(s.phase!=='lobby'){ showJE('Game already started — ask host to restart!'); return; }
+  if(s.joined.includes(name)){ showJE('Name taken — try a different name!'); return; }
 
   myName=name; myRoom=code; isHost=false;
   s.joined=[...s.joined, name];
-  await saveRoom(s);
+  // Save join to Firebase - must complete before showing wait screen
+  try{
+    await fetch(FB_URL+'/rooms/'+code+'.json',{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(s)
+    });
+  }catch(e){ console.warn('Could not save join to Firebase'); }
+  _localSave(s);
 
   document.getElementById('waitMsg').textContent='You joined as '+name+'! 🎉 Hang tight...';
   show('sWait');
