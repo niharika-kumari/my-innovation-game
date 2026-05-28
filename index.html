@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Innovation — Who's Most Likely To? 🏆</title>
-<!-- VERSION: 2.5 FIREBASE-FIXED -->
+<!-- VERSION: 2.6 POLLING-FIXED -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Righteous&family=Nunito:wght@400;600;700;800;900&display=swap');
 
@@ -817,7 +817,7 @@ function updateVotePreview(votes,players){
 
 async function hostReveal(){
   stopPoll();clearInterval(timerInterval);
-  const s=getRoomLocal(myRoom);
+  const s=await getRoom(myRoom); // get latest votes from Firebase
   if(myVote&&!hasVoted){s.votes[myVote]=(s.votes[myVote]||0)+1;}
   const vm=s.votes||{};
   const sorted=[...s.players].sort((a,b)=>(vm[b]||0)-(vm[a]||0));
@@ -832,7 +832,7 @@ async function hostReveal(){
 }
 
 async function hostNextQ(){
-  const s=getRoomLocal(myRoom);
+  const s=await getRoom(myRoom);
   if(s.currentQ>=s.questions.length-1){
     s.phase='final';saveRoom(s);showFinal(s);
   } else {
@@ -842,7 +842,7 @@ async function hostNextQ(){
 }
 
 async function hostPlayAgain(){
-  const s=getRoomLocal(myRoom);
+  const s=await getRoom(myRoom);
   s.currentQ=0;s.phase='voting';s.votes={};s.allVotes={};
   s.winTally={};s.reacts={};s.history=[];
   s.timerEnd=Date.now()+30000;saveRoom(s);loadHostVoting(s);
@@ -1060,7 +1060,8 @@ function stopPoll(){clearInterval(pollInterval);}
 function startPollLobby(){
   stopPoll();
   pollInterval=setInterval(async()=>{
-    const s=getRoomLocal(myRoom);if(!s)return;
+    const s=await getRoom(myRoom); // ← Firebase, not local!
+    if(!s)return;
     const jp=s.joined||[];
     document.getElementById('playerCount').textContent=jp.length;
     document.getElementById('lobbyPlayers').innerHTML=jp.length
@@ -1070,9 +1071,8 @@ function startPollLobby(){
     document.getElementById('startBtn').textContent=jp.length<1
       ? 'Waiting for players...'
       : '🎮 Start Game! ('+jp.length+' player'+(jp.length!==1?'s':'')+' ready)';
-    // Update share link with blob ID so players can join cross-device
     document.getElementById('joinUrl').textContent=getShareLink(myRoom);
-  },1500);
+  },2000);
 }
 
 function startPollPlayer(){
