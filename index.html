@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Innovation — Who's Most Likely To? 🏆</title>
-<!-- VERSION: 2.7 ALL-FIXED -->
+<!-- VERSION: 2.8 VOTE-FIXED -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Righteous&family=Nunito:wght@400;600;700;800;900&display=swap');
 
@@ -893,15 +893,22 @@ async function submitVote(name,idx){
   document.querySelectorAll('.vcard').forEach(c=>c.style.opacity='.42');
   const card=document.getElementById('vc'+idx);
   card.classList.add('chosen');card.style.opacity='1';
-  document.getElementById('vInfo').textContent=`✅ Voted for ${name}!`;
-  // Send vote to host via PeerJS
-  sendToHost('vote', name);
-  // Also update local state optimistically
-  const s=getRoomLocal(myRoom)||{votes:{}};
-  s.votes=s.votes||{};s.votes[name]=(s.votes[name]||0)+1;
-  _localSave(s);
-  document.getElementById('pWInfo').textContent=`You voted for ${name} 🗳️`;
-  toast(`✅ Voted for ${name}!`);
+  document.getElementById('vInfo').textContent='✅ Voted for '+name+'!';
+
+  // Save vote directly to Firebase atomically
+  try{
+    // Use Firebase REST PATCH to update just the votes field
+    const voteUpdate = {};
+    voteUpdate['votes/'+name] = (getRoomLocal(myRoom)?.votes?.[name]||0) + 1;
+    await fetch(FB_URL+'/rooms/'+myRoom+'.json',{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(voteUpdate)
+    });
+  }catch(e){ console.warn('Vote save failed:', e.message); }
+
+  document.getElementById('pWInfo').textContent='You voted for '+name+' 🗳️';
+  toast('✅ Voted for '+name+'!');
   setTimeout(()=>{if(!document.getElementById('sResults').classList.contains('active'))show('sPWait');},1000);
 }
 
@@ -912,12 +919,14 @@ function showPlayerResults(s){
   const total=Math.max(1,Object.values(vm).reduce((a,b)=>a+b,0));
   buildResults(s,sorted,vm,total,sorted[0],false);
   stopPoll();
+  const doneQ = s.currentQ;
   pollInterval=setInterval(async()=>{
-    const cur=getRoomLocal(myRoom);if(!cur)return;
+    const cur=await getRoom(myRoom); if(!cur)return;
+    fixArrays(cur);
     updateReactCounts(cur.reacts||{});
-    if(cur.phase==='voting'&&cur.currentQ>s.currentQ)loadVoting(cur);
-    if(cur.phase==='final'&&!document.getElementById('sFinal').classList.contains('active'))showFinal(cur);
-  },1500);
+    if(cur.phase==='voting'&&cur.currentQ>doneQ) loadVoting(cur);
+    if(cur.phase==='final'&&!document.getElementById('sFinal').classList.contains('active')) showFinal(cur);
+  },2000);
 }
 
 // ══ BUILD RESULTS SCREEN ═════════════════════════════════════════════════
@@ -945,7 +954,8 @@ function buildResults(s,sorted,vm,total,winner,hostView){
   setTimeout(()=>document.querySelectorAll('.rbar').forEach(b=>b.style.width=b.dataset.w+'%'),150);
 
   // Ask Claude for song + roast
-  callAI_Round(winner,s.questions[s.currentQ],s.players,wv,total,s);
+  const playersForAI = Array.isArray(s.players)?s.players:Object.values(s.players||{});
+  callAI_Round(winner,s.questions[s.currentQ],playersForAI,wv,total,s);
 }
 
 // ══ FINAL ════════════════════════════════════════════════════════════════
@@ -971,7 +981,9 @@ function showFinal(s){
   document.getElementById('finaleContent').innerHTML=`<div class="ai-loading"><div class="ai-dots"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div></div><div style="font-size:.82rem;color:var(--muted);font-weight:600;">✨ Writing the grand finale...</div></div>`;
   show('sFinal');
   launchConfetti();
-  callAI_Finale(sorted,tally,s.questions,s.players,s.history||[]);
+  const fp=Array.isArray(s.players)?s.players:Object.values(s.players||{});
+  const fq=Array.isArray(s.questions)?s.questions:Object.values(s.questions||{});
+  callAI_Finale(sorted,tally,fq,fp,s.history||[]);
 }
 
 // ══ CLAUDE AI CALLS ══════════════════════════════════════════════════════
@@ -990,11 +1002,12 @@ async function callClaude(prompt){
 async function callAI_Round(winner,question,allPlayers,winVotes,total,roomState){
   const pct=Math.round(winVotes/total*100);
   const playerList = Array.isArray(allPlayers) ? allPlayers : Object.values(allPlayers||{});
+  const safePlayerList = Array.isArray(playerList)?playerList:Object.values(playerList||{});
   const prompt=`You are the hilarious AI host of "Who's Most Likely To?" — a Fun Friday game for the My Innovation team.
 
 The question was: "Who is most likely to ${question}?"
 Winner: ${winner} (${winVotes}/${total} votes = ${pct}%)
-Team players: ${playerList.join(', ')}
+Team players: ${safePlayerList.join(', ')}
 
 Respond ONLY with valid JSON (no markdown, no extra text):
 {
