@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Innovation — Who's Most Likely To? 🏆</title>
-<!-- VERSION: 2.8 VOTE-FIXED -->
+<!-- VERSION: 2.9 FINAL -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Righteous&family=Nunito:wght@400;600;700;800;900&display=swap');
 
@@ -924,7 +924,7 @@ function showPlayerResults(s){
     const cur=await getRoom(myRoom); if(!cur)return;
     fixArrays(cur);
     updateReactCounts(cur.reacts||{});
-    if(cur.phase==='voting'&&cur.currentQ>doneQ) loadVoting(cur);
+    if(cur.phase==='voting') loadVoting(cur); // move on any voting phase
     if(cur.phase==='final'&&!document.getElementById('sFinal').classList.contains('active')) showFinal(cur);
   },2000);
 }
@@ -1000,42 +1000,46 @@ async function callClaude(prompt){
 }
 
 async function callAI_Round(winner,question,allPlayers,winVotes,total,roomState){
-  const pct=Math.round(winVotes/total*100);
-  const playerList = Array.isArray(allPlayers) ? allPlayers : Object.values(allPlayers||{});
-  const safePlayerList = Array.isArray(playerList)?playerList:Object.values(playerList||{});
-  const prompt=`You are the hilarious AI host of "Who's Most Likely To?" — a Fun Friday game for the My Innovation team.
+  // Smart song lookup — works instantly, no API needed
+  const q = question.toLowerCase();
 
-The question was: "Who is most likely to ${question}?"
-Winner: ${winner} (${winVotes}/${total} votes = ${pct}%)
-Team players: ${safePlayerList.join(', ')}
+  // Song map: keywords -> [song, film, roast template]
+  const songMap = [
+    {k:['midnight','night','late','sleep','2am','3am'],      s:'Raat Ke Dhai Baje',    f:'Aaja Nachle (2007)',   r:`${winner} treats 11pm as peak productivity hours. Even Cinderella went home at midnight!`},
+    {k:['email','inbox','message','reply','cc','forward'],   s:'Ek Do Teen',           f:'Tezaab (1988)',        r:`${winner}'s email game is legendary. Their inbox has its own postal code.`},
+    {k:['meeting','call','zoom','teams','camera'],           s:'Mile Sur Mera Tumhara', f:'Doordarshan (1988)',   r:`${winner} has been on so many calls they probably dream in mute. 🎙️`},
+    {k:['sleep','nap','snore','tired','doze'],               s:'Neend Na Aaye',         f:'Prem Deewane (1992)',  r:`${winner} has perfected the art of sleeping with eyes open. A true professional.`},
+    {k:['salary','money','pay','rich','cash','earn'],        s:'Paisa Paisa',           f:'Do Knot Disturb (2009)', r:`${winner} knows everyone's CTC including the CEO's. Human Glassdoor.`},
+    {k:['ceo','boss','manager','leader','head','top'],       s:'Main Hoon Na',          f:'Main Hoon Na (2004)',  r:`${winner} is already running things behind the scenes. The promotion is just paperwork.`},
+    {k:['mute','unmute','mic','audio','hear','sound'],       s:'Chup Chup Ke',          f:'Chup Chup Ke (2006)', r:`${winner} has muted themselves so many times, silence is their second language.`},
+    {k:['food','lunch','eat','dabba','snack','hungry'],      s:'Khana Khake',           f:'Tere Naal Love Ho Gaya', r:`${winner}'s food is so good the whole team schedules meetings around lunchtime.`},
+    {k:['dance','sing','song','music','party','fun'],        s:'Nagada Sang Dhol',      f:'Ram-Leela (2013)',     r:`${winner} doesn't need a dance floor. Any flat surface will do.`},
+    {k:['tab','browser','screen','laptop','computer'],       s:'Bijli Ki Taar',         f:'Uri (2019)',           r:`${winner} has so many browser tabs open that RAM files a complaint every morning.`},
+    {k:['ai','bot','automat','robot','chatgpt','prompt'],    s:'Robot',                 f:'Endhiran (2010)',      r:`${winner} has already automated 60% of their job and is working on the rest.`},
+    {k:['birthday','celebrate','party','cake','wish'],       s:'Happy Birthday',        f:'Various',             r:`${winner} remembers every birthday including the office plant's anniversary.`},
+    {k:['viral','famous','star','social media','reel'],      s:'Dil Chahta Hai',        f:'Dil Chahta Hai (2001)', r:`${winner} is one post away from 1M followers. The algorithm has been warned.`},
+    {k:['deadline','work','friday','weekend','office'],      s:'Kaam Chor',             f:'Kaam Chor (1982)',     r:`${winner} on a Friday at 9pm is more loyal to the office than to their own pillow.`},
+    {k:['joke','laugh','funny','comedy','smile'],            s:'Hum Hain Rahi Pyar Ke', f:'HHRPK (1993)',         r:`${winner} laughed at their own joke before finishing it. Twice.`},
+  ];
 
-Respond ONLY with valid JSON (no markdown, no extra text):
-{
-  "song": "FAMOUS SONG NAME",
-  "film": "MOVIE / ALBUM (YEAR)",
-  "roast": "Funny 2-sentence office-safe roast about ${winner} winning this. Reference the question, mix in a Bollywood or Hollywood reference."
-}
+  // Find best matching song
+  let match = songMap.find(m => m.k.some(k => q.includes(k)));
+  if(!match) match = {
+    s:'Zindagi Na Milegi Dobara', f:'ZNMD (2011)',
+    r:`${winner} has claimed this title with ${winVotes} votes! The team has spoken unanimously. 👑`
+  };
 
-Song rules: Pick ONE well-known Bollywood OR Hollywood song that cleverly matches the question topic. Make it funny and relevant. Indian office teams should recognize it.`;
+  // Build roast with vote info
+  const pct = Math.round(winVotes/total*100);
+  const roast = match.r + ` (${pct}% of the team agrees!)`;
 
-  const raw=await callClaude(prompt);
-  let html='';
-  if(!raw){
-    html=buildSongHtml('🎵 AI unavailable','','The AI took a coffee break this round! ☕');
-  } else {
-    try{
-      const clean=raw.replace(/```json|```/g,'').trim();
-      const json=JSON.parse(clean.match(/\{[\s\S]*\}/)[0]);
-      // Save to history
-      const s=getRoomLocal(myRoom);
-      if(s){s.history=s.history||[];s.history.push({question,winner,song:json.song,film:json.film,roast:json.roast});saveRoom(s);}
-      html=buildSongHtml(json.song,json.film,json.roast);
-    }catch(err){
-      html=buildSongHtml('🎵 Song loading...','','AI had a brain freeze — blame the coffee! ☕');
-    }
-  }
-  document.getElementById('aiContent').innerHTML=html;
-  document.getElementById('rNext').style.display=isHost?'block':'none';
+  // Save to history
+  const roomS = getRoomLocal(myRoom);
+  if(roomS){ roomS.history=roomS.history||[]; roomS.history.push({question,winner,song:match.s,film:match.f,roast}); saveRoom(roomS); }
+
+  const html = buildSongHtml(match.s, match.f, roast);
+  document.getElementById('aiContent').innerHTML = html;
+  document.getElementById('rNext').style.display = isHost?'block':'none';
 }
 
 function buildSongHtml(song,film,roast){
@@ -1047,32 +1051,36 @@ function buildSongHtml(song,film,roast){
   </div>`;
 }
 
-async function callAI_Finale(sorted,tally,questions,players,history){
-  const champ=sorted[0]||players[0]||'the team';
-  const wins=tally[champ]||0;
-  const songs=history.map(h=>`${h.winner}: "${h.song}" for "${h.question}"`).join('\n');
-  const summary=sorted.map(p=>`${p}: ${tally[p]} wins`).join(', ');
+async function callAI_Finale(sorted, tally, questions, players, history){
+  const champ = sorted[0] || 'the team';
+  const wins = tally[champ] || 0;
+  const champHistory = history.filter(h=>h.winner===champ);
+  const champSong = champHistory.length ? champHistory[champHistory.length-1].song : 'Zindagi Na Milegi Dobara';
 
-  const prompt=`You are the closing AI host of "Who's Most Likely To?" — My Innovation Fun Friday.
+  const titles = [
+    'Chief Vibe Officer', 'Head of Fun', 'Grand Master of Most Likely To',
+    'Supreme Leader of This Game', 'CEO of Being Most Likely',
+    'Director of Team Legends', 'Chief Innovation Champion'
+  ];
+  const title = titles[Math.floor(Math.random()*titles.length)];
 
-Team: ${players.join(', ')}
-Questions asked: ${questions.join(' | ')}
-Results: ${summary}
-Champion: ${champ} with ${wins} wins!
-Songs chosen this game:\n${songs}
+  const signoffs = [
+    `My Innovation — where legends are made, one Fun Friday at a time! 🚀`,
+    `That's a wrap! See you next Fun Friday, My Innovation! 💡`,
+    `My Innovation team — you never disappoint! Until next time! 🎉`,
+    `The My Innovation team has officially the best Fun Fridays in all of Accenture! 🏆`
+  ];
+  const signoff = signoffs[Math.floor(Math.random()*signoffs.length)];
 
-Write a SHORT, funny grand finale speech (5-6 sentences) that:
-1. Dramatically crowns ${champ} as champion
-2. Gives them a ridiculous made-up office title (e.g. "Chief Midnight Email Officer of My Innovation")
-3. Mentions the funniest song chosen tonight
-4. Says something nice about the whole My Innovation team
-5. Ends with an energetic sign-off line
+  const speech = `🏆 And the champion of today's My Innovation Fun Friday is... ${champ}! With an incredible ${wins} win${wins!==1?'s':''}, ${champ} is hereby awarded the title of "${title}"! 🎉
 
-Keep it warm, funny, office-friendly. Plain text only — no markdown, no lists.`;
+The official anthem of today's game: 🎵 "${champSong}" — and we all know why!
 
-  const raw=await callClaude(prompt);
-  const txt=raw||`🏆 ${champ} is the undisputed champion of My Innovation Fun Friday with ${wins} wins! The team has spoken and the verdict is clear. See everyone at the next Fun Friday! 🎉`;
-  document.getElementById('finaleContent').innerHTML=`<div class="song-anim"><div class="roast" style="font-size:.9rem;line-height:1.8;border-left-color:var(--gold);">${txt.replace(/\n/g,'<br>')}</div></div>`;
+${sorted.length > 1 ? `Honourable mentions to ${sorted.slice(1,3).map(p=>`${p} (${tally[p]} win${tally[p]!==1?'s':''})`).join(' and ')} for putting up a great fight!` : ''}
+
+${signoff}`;
+
+  document.getElementById('finaleContent').innerHTML = `<div class="song-anim"><div class="roast" style="font-size:.9rem;line-height:1.8;border-left-color:var(--gold);">${speech.replace(/\n/g,'<br>')}</div></div>`;
 }
 
 // ══ POLLING ══════════════════════════════════════════════════════════════
