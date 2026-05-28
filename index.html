@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Innovation — Who's Most Likely To? 🏆</title>
-<!-- VERSION: 2.6 POLLING-FIXED -->
+<!-- VERSION: 2.7 ALL-FIXED -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Righteous&family=Nunito:wght@400;600;700;800;900&display=swap');
 
@@ -579,15 +579,19 @@ async function saveRoom(s){
     method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s)
   }).catch(()=>{});
 }
-// Firebase converts arrays to objects - convert them back
+// Firebase converts arrays to objects {0:'a',1:'b'} - always convert back
 function fixArrays(s){
   if(!s) return s;
   ['players','questions','joined'].forEach(k=>{
-    if(s[k] && !Array.isArray(s[k])){
-      s[k] = Object.values(s[k]);
-    }
-    if(!s[k]) s[k] = [];
+    if(!s[k]) s[k]=[];
+    else if(!Array.isArray(s[k])) s[k]=Object.values(s[k]);
   });
+  // Fix votes/reacts objects too
+  if(!s.votes) s.votes={};
+  if(!s.reacts) s.reacts={};
+  if(!s.allVotes) s.allVotes={};
+  if(!s.winTally) s.winTally={};
+  if(!s.history) s.history=[];
   return s;
 }
 
@@ -599,7 +603,7 @@ async function getRoom(code){
     clearTimeout(timeout);
     if(r.ok){
       const d = await r.json();
-      if(d && d.code){ const fixed=fixArrays(d); _localSave(fixed); return fixed; }
+      if(d && d.code){ fixArrays(d); _localSave(d); return d; }
     }
   }catch(e){ console.warn('getRoom error:', e.message); }
   return fixArrays(getRoomLocal(code));
@@ -796,12 +800,13 @@ function loadHostVoting(s){
   startTimer(s.timerEnd,()=>hostReveal());
   stopPoll();
   pollInterval=setInterval(async()=>{
-    const cur=getRoomLocal(myRoom);if(!cur)return;
+    const cur=await getRoom(myRoom);if(!cur)return;
+    fixArrays(cur);
     const t=Object.values(cur.votes||{}).reduce((a,b)=>a+b,0);
     document.getElementById('vVotes').textContent=`${t} vote${t!==1?'s':''}`;
     updateReactCounts(cur.reacts||{});
     updateVotePreview(cur.votes||{},cur.players||[]);
-  },1200);
+  },2000);
 }
 
 function updateVotePreview(votes,players){
@@ -820,7 +825,8 @@ async function hostReveal(){
   const s=await getRoom(myRoom); // get latest votes from Firebase
   if(myVote&&!hasVoted){s.votes[myVote]=(s.votes[myVote]||0)+1;}
   const vm=s.votes||{};
-  const sorted=[...s.players].sort((a,b)=>(vm[b]||0)-(vm[a]||0));
+  const playerArr = Array.isArray(s.players)?s.players:Object.values(s.players||{});
+  const sorted=[...playerArr].sort((a,b)=>(vm[b]||0)-(vm[a]||0));
   const winner=sorted[0];
   const total=Math.max(1,Object.values(vm).reduce((a,b)=>a+b,0));
   s.winner=winner;s.phase='results';
@@ -901,7 +907,8 @@ async function submitVote(name,idx){
 
 function showPlayerResults(s){
   const vm=s.votes||{};
-  const sorted=[...s.players].sort((a,b)=>(vm[b]||0)-(vm[a]||0));
+  const playerArr = Array.isArray(s.players)?s.players:Object.values(s.players||{});
+  const sorted=[...playerArr].sort((a,b)=>(vm[b]||0)-(vm[a]||0));
   const total=Math.max(1,Object.values(vm).reduce((a,b)=>a+b,0));
   buildResults(s,sorted,vm,total,sorted[0],false);
   stopPoll();
@@ -982,11 +989,12 @@ async function callClaude(prompt){
 
 async function callAI_Round(winner,question,allPlayers,winVotes,total,roomState){
   const pct=Math.round(winVotes/total*100);
+  const playerList = Array.isArray(allPlayers) ? allPlayers : Object.values(allPlayers||{});
   const prompt=`You are the hilarious AI host of "Who's Most Likely To?" — a Fun Friday game for the My Innovation team.
 
 The question was: "Who is most likely to ${question}?"
 Winner: ${winner} (${winVotes}/${total} votes = ${pct}%)
-Team players: ${allPlayers.join(', ')}
+Team players: ${playerList.join(', ')}
 
 Respond ONLY with valid JSON (no markdown, no extra text):
 {
@@ -1077,22 +1085,24 @@ function startPollLobby(){
 
 function startPollPlayer(){
   stopPoll();
-
-  // Also poll locally as fallback
   pollInterval=setInterval(async()=>{
-    let s=getRoomLocal(myRoom);
-    if(!s){ if(s)saveRoom(s); }
-    if(!s)return;
+    const s = await getRoom(myRoom); // always Firebase
+    if(!s) return;
+    fixArrays(s);
 
-    const jp=s.joined||[];
-    document.getElementById('waitCount').textContent=jp.length;
-    document.getElementById('waitPlayers').innerHTML=jp.map(p=>
-      `<div class="pbadge">${AVATARS[jp.indexOf(p)%AVATARS.length]} ${p}</div>`).join('');
+    const jp = s.joined||[];
+    if(document.getElementById('waitCount'))
+      document.getElementById('waitCount').textContent=jp.length;
+    if(document.getElementById('waitPlayers'))
+      document.getElementById('waitPlayers').innerHTML=jp.map(p=>
+        `<div class="pbadge">${AVATARS[jp.indexOf(p)%AVATARS.length]} ${p}</div>`).join('');
 
-    if(s.phase==='voting'&&document.getElementById('sWait').classList.contains('active'))loadVoting(s);
-    if(s.phase==='results'&&document.getElementById('sPWait').classList.contains('active'))showPlayerResults(s);
-    if(s.phase==='final'&&!document.getElementById('sFinal').classList.contains('active'))showFinal(s);
-  },1800);
+    const active = id => document.getElementById(id)?.classList.contains('active');
+    if(s.phase==='voting' && (active('sWait')||active('sResults'))) loadVoting(s);
+    if(s.phase==='results' && active('sPWait')) showPlayerResults(s);
+    if(s.phase==='voting' && active('sPWait')) loadVoting(s);
+    if(s.phase==='final' && !active('sFinal')) showFinal(s);
+  },2000);
 }
 
 // ══ TIMER ═════════════════════════════════════════════════════════════════
